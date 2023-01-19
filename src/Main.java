@@ -2,9 +2,19 @@
 
 
 import javax.swing.*;
+import javax.swing.event.ChangeListener;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Caret;
+import javax.swing.text.DefaultCaret;
+import javax.swing.text.JTextComponent;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.util.HashMap;
 
 class DescriptionField extends JTextArea{
@@ -22,13 +32,99 @@ class DescriptionField extends JTextArea{
 
 
 }
+class FancyCaret extends DefaultCaret {
 
-class CodeField extends JTextArea{
+    protected synchronized void damage(Rectangle r) {
+        if (r == null)
+            return;
+
+        // give values to x,y,width,height (inherited from java.awt.Rectangle)
+        x = r.x;
+        y = r.y;
+        height = r.height;
+        // A value for width was probably set by paint(), which we leave alone.
+        // But the first call to damage() precedes the first call to paint(), so
+        // in this case we must be prepared to set a valid width, or else
+        // paint()
+        // will receive a bogus clip area and caret will not get drawn properly.
+        if (width <= 0)
+            width = getComponent().getWidth();
+
+        repaint(); // calls getComponent().repaint(x, y, width, height)
+    }
+
+    public void paint(Graphics g) {
+        JTextComponent comp = getComponent();
+        if (comp == null)
+            return;
+
+        int dot = getDot();
+        Rectangle r = null;
+        char dotChar;
+        try {
+            r = comp.modelToView(dot);
+            if (r == null)
+                return;
+            dotChar = comp.getText(dot, 1).charAt(0);
+        } catch (BadLocationException e) {
+            return;
+        }
+
+        if ((x != r.x) || (y != r.y)) {
+            // paint() has been called directly, without a previous call to
+            // damage(), so do some cleanup. (This happens, for example, when
+            // the
+            // text component is resized.)
+            repaint(); // erase previous location of caret
+            x = r.x; // Update dimensions (width gets set later in this method)
+            y = r.y;
+            height = r.height;
+        }
+
+        g.setColor(Color.WHITE);
+        g.setXORMode(comp.getBackground()); // do this to draw in XOR mode
+
+        if (dotChar == '\n') {
+            int diam = r.height;
+            if (isVisible())
+                g.fillArc(r.x - diam / 2, r.y, diam, diam, 270, 180); // half
+            // circle
+            width = diam / 2 + 2;
+            return;
+        }
+
+        if (dotChar == '\t')
+            try {
+                Rectangle nextr = comp.modelToView(dot + 1);
+                if ((r.y == nextr.y) && (r.x < nextr.x)) {
+                    width = nextr.x - r.x;
+                    if (isVisible())
+                        g.fillRoundRect(r.x, r.y, width, r.height, 12, 12);
+                    return;
+                } else
+                    dotChar = ' ';
+            } catch (BadLocationException e) {
+                dotChar = ' ';
+            }
+
+        width = g.getFontMetrics().charWidth(dotChar);
+        if (isVisible())
+            g.fillRect(r.x, r.y, width, r.height);
+    }}
+
+class CodeField extends JTextArea implements KeyListener {
     Font fieldFont = new Font("Consolas", Font.PLAIN, 16);
     int fontSize = 20;
+
+
+
+
+
     CodeField(){
-        setBackground(Color.LIGHT_GRAY);
+        setBackground(Color.BLACK);
+        setForeground(Color.WHITE);
         setFont(fieldFont);
+        setCaret(new FancyCaret());
     }
     void increaseFont(){
         fieldFont = fieldFont.deriveFont(++fontSize);
@@ -39,8 +135,20 @@ class CodeField extends JTextArea{
     }
 
 
+    @Override
+    public void keyTyped(KeyEvent keyEvent) {
 
+    }
 
+    @Override
+    public void keyPressed(KeyEvent keyEvent) {
+
+    }
+
+    @Override
+    public void keyReleased(KeyEvent keyEvent) {
+
+    }
 }
 
 class DocumentationAndExample{
@@ -48,10 +156,14 @@ class DocumentationAndExample{
     String title;
     String codeExample;
     String information;
-
 }
 public class Main {
+    static String currentCommand = "";
+    static int currPos = 0;
+
     static String currentCode;
+    static String currentOutput;
+    static boolean firsTimeSetup = true;
 
     //global hashmap containing information about documentation and examples
     static HashMap<String, DocumentationAndExample> documentationDatabase = new HashMap<>();
@@ -132,6 +244,23 @@ public class Main {
         functionsInformation.codeExample = "#coming soon";
         functionsInformation.title = "Functions";
         documentationDatabase.put("functions", functionsInformation);
+        DocumentationAndExample listsInformation = new DocumentationAndExample();
+        listsInformation.information = "You may declare a list in bos using square brackets and commas.\n" +
+                "You may add new items to a list using the plus operator\n" +
+                "You may also assign a list to a variable but use the keyword type of the list elements";
+        listsInformation.codeExample = "int my_list = [1,2,3,4]\n" +
+                "my_list+5 # returns [1,2,3,4,5]";
+        listsInformation.title= "Lists";
+        documentationDatabase.put("lists", listsInformation);
+        DocumentationAndExample printInformation = new DocumentationAndExample();
+        printInformation.information = "In bos, there is no specified print keyword that will print something to the screen\n" +
+                "Instead, anytime you specify a type of perform an operation the value of it will be printed";
+        printInformation.codeExample= "4+4 #prints 8\n" +
+                "int i =5 #prints the value of as well as assigning;\n" +
+                "++i #increments i but also prints the updated value\n" +
+                "while(i<20) ++i #a list of all of i's values will be printed";
+        printInformation.title = "Printing";
+        documentationDatabase.put("printing", listsInformation);
 
 
 
@@ -160,30 +289,112 @@ public class Main {
         panel.removeAll();
         JPanel inputOutputPanel = new JPanel(null);
         inputOutputPanel.setBounds(200,0,1080,720);
+
         panel.setBounds(0,0,1280,720);
         JPanel sideBarPanel = new JPanel(null);
         sideBarPanel.setBounds(0,0,200,720);
         JButton runButton = new JButton("Run");
-        runButton.setBounds(500,10,80,20);;
         runButton.setBackground(Color.GREEN);
         runButton.setOpaque(true);
         runButton.setBorderPainted(false);
         CodeField codeInputField = new CodeField();
+        JScrollPane codePane = new JScrollPane(codeInputField);
+        if(firsTimeSetup){ codeInputField.setText("bos shell>"); firsTimeSetup =false;}
+
+            DescriptionField outputField = new DescriptionField();
+        JScrollPane scrollpane = new JScrollPane(outputField);
+        scrollpane.setBounds(600,50,500,500);
+        JButton clearInput = new JButton("Clear");
+        clearInput.setBounds(100,10,80,20);
+        inputOutputPanel.add(clearInput);
+        clearInput.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                codeInputField.setText("bos shell>");
+                currPos =0;
+            }
+        });
+        JButton clearOutput = new JButton("Clear");
+        clearOutput.setBounds(700,10,80,20);
+        inputOutputPanel.add(clearOutput);
+        clearOutput.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                outputField.setText("");
+                currentCode = "bos shell>";
+            }
+        });
+
+        codeInputField.addKeyListener(new KeyListener() {
+            @Override
+            public void keyTyped(KeyEvent keyEvent) {
+
+            }
+
+            @Override
+            public void keyPressed(KeyEvent keyEvent) {
+                if(keyEvent.getKeyCode() == KeyEvent.VK_ENTER){
+                    currentCommand = codeInputField.getText().substring(currPos);
+
+                    codeInputField.append("\nbos shell> ");
+                    System.out.println(currPos);
+                    currPos = codeInputField.getText().length();
+                    System.out.println(currentCommand+" current command");
+                    ProcessBuilder builder = new ProcessBuilder("python3", System.getProperty("user.dir")+"/src/shell.py", currentCommand);
+                    StringBuilder totalOutput = new StringBuilder();
+                    try{
+                        Process process = builder.start();
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                        BufferedReader errorReader = new BufferedReader(new InputStreamReader((process.getErrorStream())));
+                        String lines;
+                        System.out.println("test");
+                        while((lines = reader.readLine())!=null){
+                            totalOutput.append(lines+"\n");
+                            System.out.println(lines);
+
+                        }
+                        while(((lines = errorReader.readLine())!= null)){
+                            System.out.println("error"+lines);
+                        }
+                        System.out.println(totalOutput);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                    outputField.append(totalOutput.toString());
+                    currentCode = codeInputField.getText();
+                    currentOutput = outputField.getText();
+                    codeInputField.setCaretPosition(-1);
+
+                }
+                else{
+
+                }
+            }
+
+            @Override
+            public void keyReleased(KeyEvent keyEvent) {
+
+            }
+        });
         codeInputField.setText(currentCode);
-        codeInputField.setBounds(50,50,500,500);
+        outputField.setText(currentOutput);
+
+        codePane.setBounds(50,50,500,500);
         JLabel savingLabel = new JLabel("Feel free to switch between this tab and the documentation. Your work will be saved!");
         savingLabel.setBounds(100,600,600,40);
 
-        DescriptionField outputField = new DescriptionField();
-        outputField.setBounds(600,50,500,500);
+
+
+
         inputOutputPanel.add(savingLabel);
         inputOutputPanel.add(runButton);
-        inputOutputPanel.add(outputField);
-        inputOutputPanel.add(codeInputField);
+        inputOutputPanel.add(scrollpane);
+        inputOutputPanel.add(codePane);
         displaySideBar(sideBarPanel, inputOutputPanel, codeInputField);
         panel.add(inputOutputPanel);
         panel.add(sideBarPanel);
-
+        panel.repaint();
+        panel.revalidate();
 
     }
 
@@ -204,7 +415,6 @@ public class Main {
         tryItButton.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                currentCode = field.getText();
                 codeWindow(mainPanel);
             }
         });
